@@ -1,14 +1,96 @@
 {
   "name": "mct-payment",
   "version": "1.0.0",
-  "description": "MCT module for PAYMENT",
-  "main": "dist/index.js",
+  "description": "Model Context Protocol Payment System",
+  "main": "src/index.ts",
   "scripts": {
+    "start": "ts-node src/index.ts",
     "build": "tsc",
-    "dev": "tsx watch src/index.ts",
-    "test": "jest",
-    "setup": "npm install && npx drizzle-kit push:pg"
+    "docker": "docker build -t mct-payment ."
   },
-  "keywords": ["mct", "api", "microservice"],
-  "license": "MIT"
+  "dependencies": {
+    "express": "^4.17.1",
+    "mongoose": "^5.9.7",
+    "ts-node": "^9.0.0",
+    "typescript": "^3.9.5",
+    "body-parser": "^1.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^14.0.1",
+    "@types/express": "^4.17.0",
+    "@types/mongoose": "^5.7.36"
+  }
+}
+### src/index.ts
+import express from 'express';
+import bodyParser from 'body-parser';
+import { connectDB } from './db/schema';
+import paymentRoutes from './api/routes';
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.use(bodyParser.json());
+paymentRoutes(app);
+connectDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}).catch(err => {
+  console.error('Database connection failed', err);
+  process.exit();
+});
+### src/api/routes.ts
+import { Express } from 'express';
+import { createPayment, getPaymentStatus } from '../services/paymentService';
+export default function paymentRoutes(app: Express): void {
+  app.post('/api/payment', createPayment);
+  app.get('/api/payment/:id', getPaymentStatus);
+}
+### src/db/schema.ts
+import mongoose from 'mongoose';
+const paymentSchema = new mongoose.Schema({
+  amount: Number,
+  currency: String,
+  status: { type: String, default: 'pending' }
+});
+export const Payment = mongoose.model('Payment', paymentSchema);
+export async function connectDB() {
+  await mongoose.connect('mongodb://localhost:27017/mct-payment', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  });
+}
+### src/mct/server.ts
+import { MCP } from './tools';
+export function startMCP() {
+  MCP.initialize({
+    port: 4000,
+    tools: ['paymentProcessor']
+  });
+}
+### src/mct/tools.ts
+export const MCP = {
+  tools: {},
+  initialize: function (config: any) {
+    console.log(`MCP Server starting on port ${config.port}`);
+    this.tools['paymentProcessor'] = require('../services/paymentProcessor').default;
+  }
+};
+### src/services/paymentService.ts
+import { Payment } from '../db/schema';
+export async function createPayment(req, res) {
+  try {
+    const newPayment = new Payment(req.body);
+    await newPayment.save();
+    res.status(201).send(newPayment);
+  } catch (error) {
+    res.status(400).send(error);
+  }
+}
+export async function getPaymentStatus(req, res) {
+  try {
+    const payment = await Payment.findById(req.params.id);
+    res.status(200).send(payment);
+  } catch (error) {
+    res.status(404).send({ message: 'Payment not found' });
+  }
 }
